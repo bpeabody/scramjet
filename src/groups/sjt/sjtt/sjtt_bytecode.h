@@ -70,6 +70,12 @@ class Bytecode {
             // Pop the top two arguments on the stack, add them, and push
             // the result.
 
+        e_Call,
+            // The top value on the stack is an integer with the number of
+            // arguments for the call.  Pop it and the argumetns.  Create, and
+            // begin evaluating, a new frame with a program counter set to the
+            // index indicated by the data associated with this opcode.
+
         e_Execute,
              // Pop the external function from the top of the stack, pop
              // the integer value containing the number of arguments for the
@@ -78,7 +84,10 @@ class Bytecode {
              // value of the function on the stack.
 
         e_Exit
-            // stop evaluation and return the value on the top of the stack
+            // Stop executing the current frame.  If the current frame is the
+            // last one, return the value at the top of the current stack;
+            // otherwise, pus this value on top of the stack of the previous
+            // frame and resume executing that stack.
     };
 
     static const int s_NumLocals = 32;
