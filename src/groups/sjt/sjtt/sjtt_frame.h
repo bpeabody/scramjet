@@ -45,10 +45,16 @@ class Frame {
     typedef BloombergLP::bdld::Datum Datum;
     typedef BloombergLP::bslma::Allocator Allocator;
 
+    // CLASS DATA
+    static const int s_NumLocals = 8;
+
   private:
+    // CLASS DATA
+    static const Datum s_DefaultLocals[s_NumLocals];
+
     // DATA
     bsl::vector<Datum>    d_stack;
-    bsl::vector<Datum>    d_locals;
+    Datum                 d_locals[s_NumLocals];
     const Datum          *d_arguments_p;   // held, not owned
     const sjtt::Bytecode *d_firstCode_p;
     const sjtt::Bytecode *d_pc_p;          // held, not owned
@@ -62,17 +68,16 @@ class Frame {
                                    BloombergLP::bslmf::IsBitwiseMoveable);
 
     // CREATORS
-    Frame(Allocator            *allocator,
-          const Datum          *arguments,
+    Frame(const Datum          *arguments,
           int                   numArguments,
-          const Datum          *locals,
-          int                   numLocals,
-          const sjtt::Bytecode *code);
+          const sjtt::Bytecode *code,
+          Allocator            *allocator);
         // Create a new 'Frame' object using the specified 'allocator' to
         // allocate memory, having the specified 'argumentCount' 'arguments',
-        // to execute the specified 'code'.  Note that if '0 == numArgments',
-        // 'arguments' may be null, and if '0 == numLocals', 'locals' may be
-        // null.
+        // to execute the specified 'code', and having
+        // 'sjtt::DatumUdtUtil::s_Undefined' as the initial value for all
+        // locals.  Note that if '0 == numArgments', 'arguments' may be null.
+        // The behavior is undefined unless '0 <= numArgments'.
 
     Frame(const Frame& rhs, Allocator *allocator);
         // Create a new 'Frame' object copied from the specified 'rhs' using
@@ -103,7 +108,7 @@ class Frame {
 
     void setLocal(int index, const Datum& value);
         // Assign the specified 'value' to the local at the specified 'index'.
-        // The behavior is undefined unless 'locals.size() > index'.
+        // The behavior is undefined unless 's_NumLocals > index'.
 
     void swap(Frame& other);
         // Swap contents of this 'Frame' object with the contents of the
@@ -117,7 +122,7 @@ class Frame {
     const Datum* arguments() const;
         // Return a pointer to the arguments for this frame.
 
-    const bsl::vector<Datum>& locals() const;
+    const Datum *locals() const;
         // Return the local variables for this frame.
 
     int numArguments() const;
@@ -159,77 +164,85 @@ bool operator!=(const Frame& lhs, const Frame& rhs);
                                 // -----------
 // CREATORS
 inline
-Frame::Frame(Allocator            *allocator,
-             const Datum          *arguments,
+Frame::Frame(const Datum          *arguments,
              int                   numArguments,
-             const Datum          *locals,
-             int                   numLocals,
-             const sjtt::Bytecode *code)
+             const sjtt::Bytecode *code,
+             Allocator            *allocator)
 : d_stack(allocator)
-, d_locals(locals, locals + numLocals, allocator)
 , d_arguments_p(arguments)
 , d_firstCode_p(code)
 , d_pc_p(code)
-, d_numArguments(numArguments) {
+, d_numArguments(numArguments)
+{
     BSLS_ASSERT(0 != allocator);
     BSLS_ASSERT(0 != arguments || 0 == numArguments);
     BSLS_ASSERT(0 <= numArguments);
-    BSLS_ASSERT(0 != locals || 0 == numLocals);
-    BSLS_ASSERT(0 <= numLocals);
     BSLS_ASSERT(0 != code);
+    ::memcpy(d_locals, s_DefaultLocals, sizeof(d_locals));
 }
 
 inline
 Frame::Frame(const Frame& rhs, Allocator *allocator)
 : d_stack(rhs.d_stack, allocator)
-, d_locals(rhs.d_locals, allocator)
 , d_arguments_p(rhs.d_arguments_p)
 , d_firstCode_p(rhs.d_firstCode_p)
 , d_pc_p(rhs.d_pc_p)
-, d_numArguments(rhs.d_numArguments) {
+, d_numArguments(rhs.d_numArguments)
+{
     BSLS_ASSERT(0 != allocator);
+    ::memcpy(d_locals, rhs.d_locals, sizeof(d_locals));
 }
 
 // MANIPULATORS
 inline
 Frame& Frame::operator=(const Frame& rhs)
 {
-    Frame copy(rhs, allocator());
-    swap(copy);
+    d_stack = rhs.d_stack;
+    d_arguments_p = rhs.d_arguments_p;
+    d_firstCode_p = rhs.d_firstCode_p;
+    d_pc_p = rhs.d_pc_p;
+    d_numArguments = rhs.d_numArguments;
+    ::memcpy(d_locals, rhs.d_locals, sizeof(d_locals));
     return *this;
 }
 
 inline
-void Frame::incrementPc() {
+void Frame::incrementPc()
+{
     ++d_pc_p;
 }
 
 inline
-void Frame::jump(int index) {
+void Frame::jump(int index)
+{
     BSLS_ASSERT(0 <= index);
     d_pc_p = d_firstCode_p + index;
 }
 
 inline
-void Frame::pop() {
+void Frame::pop()
+{
     BSLS_ASSERT(!d_stack.empty());
     d_stack.pop_back();
 }
 
 inline
-void Frame::popMany(int count) {
+void Frame::popMany(int count)
+{
     BSLS_ASSERT(0 <= count && d_stack.size() >= count);
     d_stack.erase(d_stack.end() - count, d_stack.end());
 }
 
 inline
-void Frame::push(const Datum& value) {
+void Frame::push(const Datum& value)
+{
     d_stack.push_back(value);
 }
 
 inline
-void Frame::setLocal(int index, const Datum& value) {
-    BSLS_ASSERT(d_locals.size() > index);
+void Frame::setLocal(int index, const Datum& value)
+{
+    BSLS_ASSERT(s_NumLocals > index);
     d_locals[index] = value;
 }
 
@@ -240,7 +253,12 @@ void Frame::swap(Frame& other)
     using bsl::swap;
     swap(d_arguments_p, other.d_arguments_p);
     swap(d_stack, other.d_stack);
-    swap(d_locals, other.d_locals);
+
+    Datum tempLocals[s_NumLocals];
+    ::memcpy(tempLocals, d_locals, sizeof(d_locals));
+    ::memcpy(d_locals, other.d_locals, sizeof(d_locals));
+    ::memcpy(other.d_locals, tempLocals, sizeof(d_locals));
+
     swap(d_firstCode_p, other.d_firstCode_p);
     swap(d_pc_p, other.d_pc_p);
     swap(d_numArguments, other.d_numArguments);
@@ -248,32 +266,38 @@ void Frame::swap(Frame& other)
 
 // ACCESSORS
 inline
-BloombergLP::bslma::Allocator *Frame::allocator() const {
+BloombergLP::bslma::Allocator *Frame::allocator() const
+{
     return d_stack.get_allocator().mechanism();
 }
 
 inline
-const BloombergLP::bdld::Datum* Frame::arguments() const {
+const BloombergLP::bdld::Datum* Frame::arguments() const
+{
     return d_arguments_p;
 }
 
 inline
-const bsl::vector<BloombergLP::bdld::Datum>& Frame::locals() const {
+const BloombergLP::bdld::Datum *Frame::locals() const
+{
     return d_locals;
 }
 
 inline
-int Frame::numArguments() const {
+int Frame::numArguments() const
+{
     return d_numArguments;
 }
 
 inline
-const sjtt::Bytecode *Frame::pc() const {
+const sjtt::Bytecode *Frame::pc() const
+{
     return d_pc_p;
 }
 
 inline
-const bsl::vector<BloombergLP::bdld::Datum>& Frame::stack() const {
+const bsl::vector<BloombergLP::bdld::Datum>& Frame::stack() const
+{
     return d_stack;
 }
 }  // close package namespace
@@ -297,11 +321,18 @@ void sjtt::swap(Frame& a, Frame& b)
 inline
 bool sjtt::operator==(const Frame& lhs, const Frame& rhs)
 {
-    return lhs.arguments() == rhs.arguments() &&
-           lhs.locals() == rhs.locals() &&
-           lhs.numArguments() == rhs.numArguments() &&
-           lhs.pc() == rhs.pc() &&
-           lhs.stack() == rhs.stack();
+    if (lhs.arguments() == rhs.arguments() &&
+        lhs.numArguments() == rhs.numArguments() &&
+        lhs.pc() == rhs.pc() &&
+        lhs.stack() == rhs.stack()) {
+        for (int i = 0; i < Frame::s_NumLocals; ++i) {
+            if (lhs.locals()[i] != rhs.locals()[i]) {
+                return false;                                         // RETURN
+            }
+        }
+        return true;
+    }
+    return false;
 }
 
 inline
